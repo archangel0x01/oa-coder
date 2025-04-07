@@ -28,6 +28,8 @@ const openai = new OpenAI({ apiKey: config.apiKey });
 let mainWindow;
 let screenshots = [];
 let multiPageMode = false;
+let showWindow = true;
+let stage = 0; // 0 = boot up stage, 1 = multi capture, 2 = AI Answered
 
 function updateInstruction(instruction) {
   if (mainWindow?.webContents) {
@@ -65,6 +67,21 @@ async function captureScreenshot() {
   }
 }
 
+function showMainWindow() {
+  mainWindow.show();
+  if (stage == 2)
+    mainWindow.webContents.send('show-app');
+  else
+    updateInstruction();
+  showWindow = true;
+}
+
+function hideMainWindow() {
+  mainWindow.webContents.send('hide-app');
+  mainWindow.hide();
+  showWindow = false;
+}
+
 async function processScreenshots() {
   try {
     // Build message with text + each screenshot
@@ -87,6 +104,24 @@ async function processScreenshots() {
 
     // Send the text to the renderer
     mainWindow.webContents.send('analysis-result', response.choices[0].message.content);
+    
+    // // Create mock data for the response
+    // const mockResponse = {
+    //   choices: [
+    //       {
+    //           message: {
+    //               content: "This is the mocked response from the AI."
+    //           }
+    //       }
+    //   ]
+    // };
+
+    // // Simulate receiving the response
+    // const response = mockResponse;
+
+    // Send the text to the renderer
+    mainWindow.webContents.send('analysis-result', response.choices[0].message.content);
+    stage = 2;
   } catch (err) {
     console.error("Error in processScreenshots:", err);
     if (mainWindow.webContents) {
@@ -100,10 +135,12 @@ function resetProcess() {
   screenshots = [];
   multiPageMode = false;
   mainWindow.webContents.send('clear-result');
-  updateInstruction("Ctrl+Shift+S: Screenshot | Ctrl+Shift+A: Multi-mode");
+  updateInstruction("Ctrl+Shift+S: Screenshot | Ctrl+Shift+A: Multi-mode | Ctrl+Shift+W: Hide Window | Ctrl+Shift+Q: Close");
+  stage = 0;
 }
 
 function createWindow() {
+  stage = 0;
   mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
@@ -145,6 +182,7 @@ function createWindow() {
       const img = await captureScreenshot();
       screenshots.push(img);
       updateInstruction("Multi-mode: Ctrl+Shift+A to add, Ctrl+Shift+S to finalize");
+      stage = 1;
     } catch (error) {
       console.error("Ctrl+Shift+A error:", error);
     }
@@ -153,6 +191,18 @@ function createWindow() {
   // Ctrl+Shift+R => reset
   globalShortcut.register('CommandOrControl+Shift+R', () => {
     resetProcess();
+  });
+
+  // Ctrl+Shift+W => Hide app
+  globalShortcut.register('CommandOrControl+Shift+W', () => {
+    if (showWindow)
+    {
+      hideMainWindow();
+    }
+    else
+    {
+      showMainWindow();
+    }
   });
      
   // Ctrl+Shift+Q => Quit the application
