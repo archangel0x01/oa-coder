@@ -3,27 +3,49 @@ const path = require('path');
 const screenshot = require('screenshot-desktop');
 const fs = require('fs');
 const { OpenAI } = require('openai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 let config;
+let openai;
+let gemini;
+let activeProvider = 'openai'; // Default provider
+
 try {
   const configPath = path.join(__dirname, 'config.json');
   const configData = fs.readFileSync(configPath, 'utf8');
   config = JSON.parse(configData);
   
-  if (!config.apiKey) {
-    throw new Error("API key is missing in config.json");
-  }
-  
-  // Set default model if not specified
-  if (!config.model) {
-    config.model = "gpt-4o-mini";
-    console.log("Model not specified in config, using default:", config.model);
+  // Check for OpenAI configuration
+  if (config.openai && config.openai.apiKey) {
+    openai = new OpenAI({ apiKey: config.openai.apiKey });
+    
+    // Set default OpenAI model if not specified
+    if (!config.openai.model) {
+      config.openai.model = "gpt-4o-mini";
+      console.log("OpenAI model not specified in config, using default:", config.openai.model);
+    }
+    activeProvider = 'openai';
+    console.log("Using OpenAI as the primary provider");
+  } 
+  // Check for Gemini configuration if OpenAI is not available
+  else if (config.gemini && config.gemini.apiKey) {
+    gemini = new GoogleGenerativeAI(config.gemini.apiKey);
+    
+    // Set default Gemini model if not specified
+    if (!config.gemini.model) {
+      config.gemini.model = "gemini-pro-vision";
+      console.log("Gemini model not specified in config, using default:", config.gemini.model);
+    }
+    activeProvider = 'gemini';
+    console.log("Using Gemini as the primary provider");
+  } 
+  else {
+    throw new Error("No valid API configuration found. Please provide either OpenAI or Gemini API keys in config.json");
   }
 } catch (err) {
   console.error("Error reading config:", err);
   app.quit();
 }
-const openai = new OpenAI({ apiKey: config.apiKey });
 
 let mainWindow;
 let screenshots = [];
@@ -55,7 +77,7 @@ async function captureScreenshot() {
     const base64Image = imageBuffer.toString('base64');
 
     mainWindow.show();
-    return base64Image;
+    return { base64Image, imagePath };
   } catch (err) {
     mainWindow.show();
     if (mainWindow.webContents) {
@@ -67,31 +89,75 @@ async function captureScreenshot() {
 
 async function processScreenshots() {
   try {
-    // Build message with text + each screenshot
-    const messages = [
-      { type: "text", text: "Can you solve the question for me and give the final answer/code?" }
-    ];
-    for (const img of screenshots) {
-      messages.push({
-        type: "image_url",
-        image_url: { url: `data:image/png;base64,${img}` }
-      });
+    if (activeProvider === 'openai') {
+      await processWithOpenAI();
+    } else if (activeProvider === 'gemini') {
+      await processWithGemini();
+    } else {
+      throw new Error("No valid AI provider configured");
     }
-
-    // Make the request
-    const response = await openai.chat.completions.create({
-      model: config.model,
-      messages: [{ role: "user", content: messages }],
-      max_tokens: 5000
-    });
-
-    // Send the text to the renderer
-    mainWindow.webContents.send('analysis-result', response.choices[0].message.content);
   } catch (err) {
-    console.error("Error in processScreenshots:", err);
+    console.error(`Error in processScreenshots with ${activeProvider}:`, err);
     if (mainWindow.webContents) {
       mainWindow.webContents.send('error', err.message);
     }
+  }
+}
+
+async function processWithOpenAI() {
+  // Build message with text + each screenshot
+  const messages = [
+    { type: "text", text: "Can you solve the question for me and give the final answer/code?" }
+  ];
+  
+  for (const img of screenshots) {
+    messages.push({
+      type: "image_url",
+      image_url: { url: `data:image/png;base64,${img.base64Image}` }
+    });
+  }
+
+  // Make the request
+  const response = await openai.chat.completions.create({
+    model: config.openai.model,
+    messages: [{ role: "user", content: messages }],
+    max_tokens: 5000
+  });
+
+  // Send the text to the renderer
+  mainWindow.webContents.send('analysis-result', response.choices[0].message.content);
+}
+
+async function processWithGemini() {
+  try {
+    const model = gemini.getGenerativeModel({ model: config.gemini.model });
+    
+    // Prepare prompt parts
+    const promptParts = [
+      { text: "Can you solve the question for me and give the final answer/code?" }
+    ];
+    
+    // Add images to the prompt
+    for (const img of screenshots) {
+      const imageData = fs.readFileSync(img.imagePath);
+      promptParts.push({
+        inlineData: {
+          data: Buffer.from(imageData).toString('base64'),
+          mimeType: 'image/png'
+        }
+      });
+    }
+    
+    // Generate content
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: promptParts }]
+    });
+    
+    const response = result.response;
+    mainWindow.webContents.send('analysis-result', response.text());
+  } catch (error) {
+    console.error("Gemini API error:", error);
+    throw error;
   }
 }
 
@@ -156,11 +222,10 @@ function createWindow() {
   });
      
   // Ctrl+Shift+Q => Quit the application
-globalShortcut.register('CommandOrControl+Shift+Q', () => {
-  console.log("Quitting application...");
-  app.quit();
-  
-});
+  globalShortcut.register('CommandOrControl+Shift+Q', () => {
+    console.log("Quitting application...");
+    app.quit();
+  });
 }
 
 app.whenReady().then(createWindow);
