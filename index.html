@@ -163,7 +163,7 @@
       'analysis-result': (event, result) => {
         showOverlay();
         document.getElementById('response-box').innerHTML = marked.parse(result);
-        updateBanner("Ctrl+Shift+R: Repeat process");
+        updateBanner("Ctrl+Shift+R: Repeat process | Ctrl+Shift+W: Hide Window | Ctrl+Shift+W: Close");
       },
       
       'error': (event, error) => {
@@ -182,6 +182,16 @@
       'hide-instruction': () => {
         updateBanner('', false);
       },
+
+      'hide-app': () => {
+        updateBanner('', false);
+        hideOverlay();
+      },
+
+      'show-app': () => {
+        updateBanner('', true);
+        showOverlay();
+      },
       
       'clear-result': () => {
         document.getElementById('response-box').innerHTML = "";
@@ -199,7 +209,7 @@
       });
     });
     
-    updateBanner("Ctrl+Shift+S: Screenshot | Ctrl+Shift+A: Multi-mode | Ctrl+Shift+Q: Close");
+    updateBanner("Ctrl+Shift+S: Screenshot | Ctrl+Shift+A: Multi-mode | Ctrl+Shift+W: Hide Window | Ctrl+Shift+Q: Close");
   </script>
 </body>
 </html>
